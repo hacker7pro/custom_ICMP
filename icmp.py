@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-Custom ICMP Packet Crafter – bits and bytes and payloads
+Custom ICMP Packet Crafter – fixed generate_payload args + raw bits for option 6
+- Option 6: varied 0/1 bit stream (continuous sequences in Wireshark binary view)
+- Option 7: randomized repeating hex pair per packet
+- Added: 8. custom hex payload (user inputs hex string)
+- Fast checksum adjustment
 """
 
 import scapy.all as scapy
@@ -49,10 +53,8 @@ def generate_payload(length, ptype_num, pattern_arg=None):
     if length <= 0:
         return b''
 
-    if ptype_num == 1:   # random-bits (only 00 or 01 bytes)
-        payload = bytes(random.randint(0, 1) for _ in range(length))
-        print(f"  → Option 1: random single-bit bytes ({length} bytes)")
-        return payload
+    if ptype_num == 1:   # random-bits
+        return bytes(random.randint(0, 1) for _ in range(length))
 
     elif ptype_num == 2: # random-hex
         return bytes(random.randint(0, 255) for _ in range(length))
@@ -77,39 +79,34 @@ def generate_payload(length, ptype_num, pattern_arg=None):
         pool = (string.ascii_letters + string.digits + string.punctuation).encode()
         return bytes(random.choice(pool) for _ in range(length))
 
-    elif ptype_num == 6: # copy option 1 → convert to raw continuous 0/1 bit stream
-        # Step 1: generate the same kind of payload as option 1
-        option1_bytes = bytes(random.randint(0, 1) for _ in range(length))
+    elif ptype_num == 6: # raw varied 0/1 bit stream – continuous sequences
+        # Generate full bit string
+        bit_string = ''.join(random.choice('01') for _ in range(length * 8))
 
-        # Step 2: convert those bytes into a long bit string (0s and 1s)
-        bit_string = ''
-        for byte in option1_bytes:
-            # Each byte becomes 8 bits (MSB first)
-            bit_string += f'{byte:08b}'   # e.g. 0 → '00000000', 1 → '00000001'
+        # Add occasional longer runs of same bit
+        for _ in range(random.randint(2, 6)):
+            pos = random.randint(0, length * 8 - 100)
+            run_len = random.randint(16, 80)
+            run_bit = random.choice('01')
+            run = run_bit * run_len
+            bit_string = bit_string[:pos] + run + bit_string[pos + run_len:]
 
-        # Optional: add a little variation so it's not perfectly aligned
-        # (optional — comment out if you want exact copy of option 1 bits)
-        if random.random() < 0.3:
-            pos = random.randint(0, len(bit_string) - 40)
-            flip = random.choice(['0','1'])
-            bit_string = bit_string[:pos] + flip * random.randint(8, 32) + bit_string[pos+random.randint(8,32):]
+        # Trim exactly
+        bit_string = bit_string[:length * 8]
 
-        # Step 3: convert bit string back to bytes (so Wireshark sees the bits)
+        # Convert bit string to bytes
         payload = bytearray()
         for j in range(0, len(bit_string), 8):
-            chunk = bit_string[j:j+8]
-            if len(chunk) < 8:
-                chunk += '0' * (8 - len(chunk))
-            byte_val = int(chunk, 2)
+            byte_bits = bit_string[j:j+8]
+            if len(byte_bits) < 8:
+                byte_bits += '0' * (8 - len(byte_bits))
+            byte_val = int(byte_bits, 2)
             payload.append(byte_val)
 
-        # Preview first 64 bits
-        preview = bit_string[:64]
-        print(f"  → Option 6: raw bits from option-1 style random → first 64 bits: {preview}")
-        print("    (Wireshark binary view should show continuous 00111101... sequences)")
+        print(f"  → Raw bit stream (varied 0/1 sequences) – check Wireshark binary view for 001111011110... style")
         return bytes(payload)
 
-    elif ptype_num == 7: # hex-pattern
+    elif ptype_num == 7: # hex-pattern – repeating pair
         hex_pairs = [
             (0x55, 0xAA), (0xA5, 0x5A), (0xFF, 0x00), (0xF0, 0x0F),
             (0xCC, 0x33), (0xAA, 0x55), (0xAB, 0xCD), (0x12, 0x34)
@@ -121,8 +118,39 @@ def generate_payload(length, ptype_num, pattern_arg=None):
             payload.append(pair[j % 2])
         return bytes(payload)
 
+    elif ptype_num == 8: # custom hex payload – user inputs hex string
+        hex_input = input("Enter custom payload as hex string (e.g. deadbeef112233 or 414243): ").strip()
+        if not hex_input:
+            print("  → No hex input → falling back to random bytes")
+            return bytes(random.randint(0, 255) for _ in range(length))
+
+        # Clean input: remove spaces, 0x, etc.
+        hex_input = hex_input.replace(" ", "").replace("0x", "").lower()
+        if not all(c in '0123456789abcdef' for c in hex_input):
+            print("  → Invalid hex → falling back to random bytes")
+            return bytes(random.randint(0, 255) for _ in range(length))
+
+        # Convert hex string to bytes
+        try:
+            custom_bytes = bytes.fromhex(hex_input)
+        except:
+            print("  → Hex conversion failed → falling back to random")
+            return bytes(random.randint(0, 255) for _ in range(length))
+
+        # Repeat or truncate to match desired length
+        if len(custom_bytes) == 0:
+            return b''
+        if len(custom_bytes) >= length:
+            custom_bytes = custom_bytes[:length]
+        else:
+            repeats = (length + len(custom_bytes) - 1) // len(custom_bytes)
+            custom_bytes = (custom_bytes * repeats)[:length]
+
+        print(f"  → Custom hex payload used ({len(custom_bytes)} bytes)")
+        return custom_bytes
+
     return b''
-    
+
 def ask_padding():
     ans = input("\nAdd padding IP→ICMP? (y/n): ").strip().lower()
     if ans not in ['y','yes']: return None
@@ -134,7 +162,7 @@ def ask_padding():
     return bytes([b]) * cnt
 
 def main():
-    print("=== ICMP Crafter – raw bits for option 6 ===\n")
+    print("=== ICMP Crafter – raw bits for option 6 + custom hex (8) ===\n")
 
     # IP Layer
     print("IP Layer:")
@@ -169,8 +197,8 @@ def main():
             print("  Invalid → auto mode")
             use_custom = False
 
-    # Payload type selection (1-7)
-    print("\nChoose payload type (enter number 1-7):")
+    # Payload type selection (1-8)
+    print("\nChoose payload type (enter number 1-8):")
     print("1. random-bits      → only 0 and 1 bytes")
     print("2. random-hex       → random 00–FF bytes")
     print("3. repeat-pattern   → repeating single byte")
@@ -178,9 +206,10 @@ def main():
     print("5. mixed            → letters+digits+symbols")
     print("6. bits-pattern     → raw varied 0/1 bit stream (continuous sequences)")
     print("7. hex-pattern      → randomized repeating hex pair per packet")
+    print("8. custom hex       → input your own hex string (e.g. deadbeef112233)")
     try:
         ptype = int(input("→ "))
-        if not 1 <= ptype <= 7: ptype = 5
+        if not 1 <= ptype <= 8: ptype = 5
     except:
         ptype = 5
         print("Invalid → using 5 (mixed)")
@@ -191,8 +220,12 @@ def main():
         try: pattern_byte = int(p, 16) & 0xFF
         except: pattern_byte = 0xAA
 
-    # Length logic
-    if use_custom:
+    # Length logic – skip size question for option 8
+    if ptype == 8:
+        # Custom hex will determine size internally
+        payload_len = DEFAULT_PAYLOAD_LEN  # fallback / max size
+        print(f"  → Custom hex mode – size will be based on your input (max {DEFAULT_PAYLOAD_LEN} bytes)")
+    elif use_custom:
         parity = input("Preferred payload parity (odd / even): ").strip().lower()
         prefer_odd = parity.startswith('o')
         payload_len = DEFAULT_PAYLOAD_LEN
