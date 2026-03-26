@@ -16,7 +16,7 @@
 import random, string, time
 import scapy.all as scapy
 from scapy.utils import checksum
-from scapy.layers.inet import IP, ICMP, Raw
+from scapy.all import IP, ICMP, Raw
 from scapy.layers.l2 import Ether
 
 DEFAULT_PAYLOAD_LEN = 500
@@ -369,13 +369,23 @@ def main():
         print(f"  {c(GR,'→')}  {c(MG, f'0x{ip_ck:04x}')}")
 
     # ── Protocol selection ───────────────────────────────────
+    # When payload > 0 only ICMP is available.
+    # When payload = 0 all three modes are shown.
     section("Protocol")
-    print(f"  {c(GR,'1.')}  {c(WH,'ICMP')}")
-    print(f"  {c(GR,'2.')}  {c(WH,'Raw hex')}  {c(DM,'(bytes after IP header, uses proto field set above)')}")
-    print(f"  {c(GR,'3.')}  {c(WH,'IP Raw payload')}  {c(DM,'(reserved / non-standard proto — bare IP + raw body)')}")
-    proto_sel  = (input(f"\n  {c(WH,'→')} [1]: ").strip() or "1")
-    use_raw    = (proto_sel == "2")
-    use_ip_raw = (proto_sel == "3")
+    use_raw    = False
+    use_ip_raw = False
+    if payload_len == 0:
+        print(f"  {c(GR,'1.')}  {c(WH,'ICMP')}  {c(DM,'(ICMP header only, no payload)')}")
+        print(f"  {c(GR,'2.')}  {c(WH,'Raw hex')}  {c(DM,'(bytes after IP header, uses proto field set above)')}")
+        print(f"  {c(GR,'3.')}  {c(WH,'IP Raw payload')}  {c(DM,'(reserved / non-standard proto — bare IP + raw body)')}")
+        proto_sel  = (input(f"\n  {c(WH,'→')} [1]: ").strip() or "1")
+        use_raw    = (proto_sel == "2")
+        use_ip_raw = (proto_sel == "3")
+    else:
+        print(f"  {c(GR,'1.')}  {c(WH,'ICMP')}  {c(DM,f'(payload={payload_len}B — raw hex option available inside ICMP section)')}")
+        print(f"  {c(DM,'2.')}  {c(DM,'Raw hex')}  {c(DM,'(hidden — only available when payload=0)')}")
+        print(f"  {c(DM,'3.')}  {c(DM,'IP Raw payload')}  {c(DM,'(hidden — only available when payload=0)')}")
+        input(f"\n  {c(WH,'→')} [1 only]: ")  # auto-forced to ICMP
 
     # ════════════════════════════════════════════════════════
     #  RAW MODE  (option 2)
@@ -526,10 +536,10 @@ def main():
     else:
         print(f"  {c(GR,'→')}  keeping {cur_pl_label}")
 
-    # Payload type
-    ptype, pat = 5, None
-    if payload_len > 0:
-        print(f"""
+    # Payload type — payload_len > 0 guaranteed here
+    # Option 9 = raw hex (user supplies exact bytes, no generation)
+    ptype, pat, icmp_raw_hex = 5, None, b''
+    print(f"""
   {c(B+CY,'Payload type')}
   {c(DM,'┌───┬──────────────────────────────────────────────────┐')}
   {c(DM,'│')} {c(GR,'1')} {c(DM,'│')} random bits     {c(DM,'(0 or 1 per byte)')}                {c(DM,'│')}
@@ -540,14 +550,21 @@ def main():
   {c(DM,'│')} {c(GR,'6')} {c(DM,'│')} bit stream      {c(DM,'(random runs of 0s and 1s)')}       {c(DM,'│')}
   {c(DM,'│')} {c(GR,'7')} {c(DM,'│')} hex pair        {c(DM,'(two-byte alternating pattern)')}   {c(DM,'│')}
   {c(DM,'│')} {c(GR,'8')} {c(DM,'│')} custom hex      {c(DM,'(you supply the bytes)')}           {c(DM,'│')}
+  {c(DM,'│')} {c(GR,'9')} {c(DM,'│')} raw hex         {c(DM,'(exact bytes as ICMP payload — any case)')} {c(DM,'│')}
   {c(DM,'└───┴──────────────────────────────────────────────────┘')}""")
-        try:    ptype = int(input(f"  {c(WH,'→')} [5]: ").strip() or 5); ptype = ptype if 1<=ptype<=8 else 5
-        except: ptype = 5
-        if ptype == 3:
-            try:    pat = int((input(f"  {c(CY,'Pattern byte hex')} [AA]: ").strip() or "AA"), 16) & 0xFF
-            except: pat = 0xAA
-    else:
-        print(f"  {c(DM,'→  payload type skipped (empty payload)')}")
+    try:    ptype = int(input(f"  {c(WH,'→')} [5]: ").strip() or 5); ptype = ptype if 1<=ptype<=9 else 5
+    except: ptype = 5
+    if ptype == 3:
+        try:    pat = int((input(f"  {c(CY,'Pattern byte hex')} [AA]: ").strip() or "AA"), 16) & 0xFF
+        except: pat = 0xAA
+    elif ptype == 9:
+        raw_hex_in = input(f"  {c(CY,'ICMP raw hex payload')} {c(DM,'(any case: deadBEEF / DEADBEEF)')} {c(WH,'→')} ").strip()
+        icmp_raw_hex = hex_to_bytes(raw_hex_in) or b''
+        if not icmp_raw_hex and raw_hex_in:
+            print(f"  {c(RD,'✗')}  Invalid hex {c(DM,'→ empty')}")
+        else:
+            print(f"  {c(GR,'✓')}  {c(MG, raw_hex_in)}  ({c(YL, str(len(icmp_raw_hex))+'B')})")
+        payload_len = len(icmp_raw_hex)  # actual length now known
 
     padding = ask_padding()
     count, interval, timeout, wait = ask_send_params()
@@ -557,7 +574,8 @@ def main():
 
     for i in range(count):
         seq     = (seqb + i) % 65536
-        payload = gen_payload(payload_len, ptype, pat)
+        # ptype 9 = raw hex — use exact bytes supplied by user
+        payload = icmp_raw_hex if ptype == 9 else gen_payload(payload_len, ptype, pat)
         if not icmp_custom and icmp_extra:
             payload += b'\x00' * icmp_extra
 
