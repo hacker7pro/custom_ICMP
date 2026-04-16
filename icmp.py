@@ -2,7 +2,8 @@
 """
 ╔══════════════════════════════════════════════════════════════╗
 ║           Custom ICMP / Raw Packet Crafter                   ║
-║  Craft IP/ICMP or raw packets with full field control        ║
+║  Craft IP/ICMP or raw packets with full field control        ╠══════════════════════════════════════════════════════════════╗
+║  Optional: Skip IP layer — auto-calculated after ICMP/raw   ║
 ╚══════════════════════════════════════════════════════════════╝
 
   Bit · Byte · Hex quick reference
@@ -228,25 +229,44 @@ def main():
         "16bit=2B=4hex  "
         "32bit=4B=8hex"))
 
-    # ── IP Header ────────────────────────────────────────────
-    section("IP Header")
+    # ══════════════════════════════════════════════════════════
+    #  NEW ── Ask user: skip IP layer or configure manually?
+    # ══════════════════════════════════════════════════════════
+    section("IP Layer Mode")
+    print(f"  {c(GR,'1.')}  {c(WH,'Configure IP layer manually')}  {c(DM,'(original flow — full control)')}")
+    print(f"  {c(GR,'2.')}  {c(WH,'Skip IP layer')}  {c(DM,'(auto-calculated after ICMP/raw fields are set)')}")
+    ip_mode = (input(f"\n  {c(WH,'→')} [1]: ").strip() or "1")
+    skip_ip = (ip_mode == "2")
 
-    version = parse_num(prompt("Version", 4, "4","0100","4", lo=4, hi=4), 4, "Version")
+    if skip_ip:
+        print(f"\n  {c(YL,'→')}  IP layer will be {c(B+YL,'auto-calculated')} after payload fields.")
+        print(f"  {c(DM,'   IHL=5, Version=4, TTL=64, Proto=1(ICMP), ID=0, Flags=0x0000')}")
+        print(f"  {c(DM,'   Total Length and Checksum computed once payload size is known.')}")
 
-    ihl = parse_num(prompt("IHL", 4, "5","0101","5",
-                            lo=5, hi=15,
-                            note="5=20B(base only)  6=24B  7=28B ... 15=60B  |  "
-                                 "max IHL=15 → 60B total = 20B base + 40B options"),
-                    5, "IHL")
+    # ══════════════════════════════════════════════════════════
+    #  BRANCH A — original IP header flow (skip_ip == False)
+    # ══════════════════════════════════════════════════════════
+    if not skip_ip:
 
-    dscp = parse_num(prompt("DSCP", 6, "00","000000","0", lo=0, hi=63),  0, "DSCP")
-    ecn  = parse_num(prompt("ECN",  2, "00","00","0",     lo=0, hi=3),   0, "ECN")
-    ttl  = parse_num(prompt("TTL",  8, "40","01000000","64",
-                             lo=1, hi=255, note="1 byte  |  common: 64 (Linux) 128 (Windows)"),
-                     64, "TTL")
+        # ── IP Header ────────────────────────────────────────
+        section("IP Header")
 
-    dm = c(DM,"│"); hd = c(B+CY,"│")
-    print(f"""
+        version = parse_num(prompt("Version", 4, "4","0100","4", lo=4, hi=4), 4, "Version")
+
+        ihl = parse_num(prompt("IHL", 4, "5","0101","5",
+                                lo=5, hi=15,
+                                note="5=20B(base only)  6=24B  7=28B ... 15=60B  |  "
+                                     "max IHL=15 → 60B total = 20B base + 40B options"),
+                        5, "IHL")
+
+        dscp = parse_num(prompt("DSCP", 6, "00","000000","0", lo=0, hi=63),  0, "DSCP")
+        ecn  = parse_num(prompt("ECN",  2, "00","00","0",     lo=0, hi=3),   0, "ECN")
+        ttl  = parse_num(prompt("TTL",  8, "40","01000000","64",
+                                 lo=1, hi=255, note="1 byte  |  common: 64 (Linux) 128 (Windows)"),
+                         64, "TTL")
+
+        dm = c(DM,"│"); hd = c(B+CY,"│")
+        print(f"""
   {c(B+CY,'Protocol number reference')} {c(DM,'(8 bit = 1 byte = 2 hex chars)')}
   {c(DM,'┌──────┬──────┬─────────────────────────────────────────┐')}
   {hd} {c(YL,'dec ')} {dm} {c(YL,'hex ')} {dm} {c(CY,'protocol')}                                {hd}
@@ -265,19 +285,19 @@ def main():
   {dm} {c(GR,'132')}  {dm} {c(MG,'0x84')} {dm} SCTP   Stream Control Transmission     {dm}
   {c(DM,'└──────┴──────┴─────────────────────────────────────────┘')}""")
 
-    proto = parse_num(prompt("Proto", 8, "01","00000001","1",
-                              lo=0, hi=255, note="1 byte  |  see table above"),
-                      1, "Proto")
+        proto = parse_num(prompt("Proto", 8, "01","00000001","1",
+                                  lo=0, hi=255, note="1 byte  |  see table above"),
+                          1, "Proto")
 
-    ip_id = parse_num(prompt("ID", 16, "0000","0"*16,"0",
-                              lo=0, hi=65535, note="2 bytes  |  fragment identification"),
-                      0, "ID")
+        ip_id = parse_num(prompt("ID", 16, "0000","0"*16,"0",
+                                  lo=0, hi=65535, note="2 bytes  |  fragment identification"),
+                          0, "ID")
 
-    src = input(f"\n  {c(CY,'Src IP')}  [{c(BL, src_ip())}]: ").strip() or src_ip()
-    dst = input(f"  {c(CY,'Dst IP')}  [{c(BL,'8.8.8.8')}]:  ").strip() or "8.8.8.8"
+        src = input(f"\n  {c(CY,'Src IP')}  [{c(BL, src_ip())}]: ").strip() or src_ip()
+        dst = input(f"  {c(CY,'Dst IP')}  [{c(BL,'8.8.8.8')}]:  ").strip() or "8.8.8.8"
 
-    # ── IP Options ───────────────────────────────────────────
-    print(f"""
+        # ── IP Options ───────────────────────────────────────
+        print(f"""
   {c(B+CY,'IP Options')}
   {c(DM,'┌─────────────────────────────────────────────────────┐')}
   {c(DM,'│')}  min  =  {c(YL,' 4B')}  ({c(MG,' 8 hex chars')})                         {c(DM,'│')}
@@ -287,46 +307,361 @@ def main():
   {c(DM,'│')}  non-multiples are {c(YL,'auto zero-padded')} to next 4B        {c(DM,'│')}
   {c(DM,'└─────────────────────────────────────────────────────┘')}""")
 
-    ip_opts = b''
-    if input(f"  {c(CY,'Add IP options?')} (y/n) [n]: ").strip().lower() in ('y','yes'):
-        h = input(f"  {c(CY,'Options hex')} {c(WH,'→')} ").strip().replace(" ","").replace("0x","").upper()
-        if h and all(ch in "0123456789ABCDEF" for ch in h):
-            try:
-                ip_opts = bytes.fromhex(h)
-                if len(ip_opts) > 40:
-                    print(f"  {c(YL,'⚠')}  Exceeds max 40B (got {len(ip_opts)}B) {c(DM,'→ truncating to 40B')}")
-                    ip_opts = ip_opts[:40]
-                pad = (4 - len(ip_opts) % 4) % 4
-                if pad:
-                    ip_opts += b'\x00' * pad
-                    print(f"  {c(YL,'→')}  Auto-padded +{pad}B → {c(YL,str(len(ip_opts))+'B')}: {c(MG, ip_opts.hex().upper())}")
-                else:
-                    print(f"  {c(GR,'✓')}  Accepted {c(YL,str(len(ip_opts))+'B')}: {c(MG, h)}")
+        ip_opts = b''
+        if input(f"  {c(CY,'Add IP options?')} (y/n) [n]: ").strip().lower() in ('y','yes'):
+            h = input(f"  {c(CY,'Options hex')} {c(WH,'→')} ").strip().replace(" ","").replace("0x","").upper()
+            if h and all(ch in "0123456789ABCDEF" for ch in h):
+                try:
+                    ip_opts = bytes.fromhex(h)
+                    if len(ip_opts) > 40:
+                        print(f"  {c(YL,'⚠')}  Exceeds max 40B (got {len(ip_opts)}B) {c(DM,'→ truncating to 40B')}")
+                        ip_opts = ip_opts[:40]
+                    pad = (4 - len(ip_opts) % 4) % 4
+                    if pad:
+                        ip_opts += b'\x00' * pad
+                        print(f"  {c(YL,'→')}  Auto-padded +{pad}B → {c(YL,str(len(ip_opts))+'B')}: {c(MG, ip_opts.hex().upper())}")
+                    else:
+                        print(f"  {c(GR,'✓')}  Accepted {c(YL,str(len(ip_opts))+'B')}: {c(MG, h)}")
 
-                needed_ihl = 5 + len(ip_opts) // 4
-                if needed_ihl != ihl:
-                    print(f"  {c(YL,'⚠')}  IHL conflict: you set {c(MG,f'IHL={ihl}')} ({ihl*4}B) but "
-                          f"{len(ip_opts)}B options require {c(GR,f'IHL={needed_ihl}')} ({needed_ihl*4}B)")
-                    print(f"     {c(GR,'1.')} Auto-adjust IHL to {c(GR,str(needed_ihl))}  {c(DM,'(correct)')}")
-                    print(f"     {c(YL,'2.')} Keep IHL={c(YL,str(ihl))}  {c(DM,'(intentional mismatch on wire)')}")
-                    ihl_choice = input(f"  {c(WH,'→')} [1]: ").strip() or "1"
-                    if ihl_choice == "2":
-                        print(f"  {c(YL,'→')}  Keeping {c(MG,f'IHL={ihl}')} ({ihl*4}B)  {c(DM,'— mismatch intentional')}")
+                    needed_ihl = 5 + len(ip_opts) // 4
+                    if needed_ihl != ihl:
+                        print(f"  {c(YL,'⚠')}  IHL conflict: you set {c(MG,f'IHL={ihl}')} ({ihl*4}B) but "
+                              f"{len(ip_opts)}B options require {c(GR,f'IHL={needed_ihl}')} ({needed_ihl*4}B)")
+                        print(f"     {c(GR,'1.')} Auto-adjust IHL to {c(GR,str(needed_ihl))}  {c(DM,'(correct)')}")
+                        print(f"     {c(YL,'2.')} Keep IHL={c(YL,str(ihl))}  {c(DM,'(intentional mismatch on wire)')}")
+                        ihl_choice = input(f"  {c(WH,'→')} [1]: ").strip() or "1"
+                        if ihl_choice == "2":
+                            print(f"  {c(YL,'→')}  Keeping {c(MG,f'IHL={ihl}')} ({ihl*4}B)  {c(DM,'— mismatch intentional')}")
+                        else:
+                            ihl = needed_ihl
+                            print(f"  {c(GR,'→')}  IHL auto-adjusted to {c(MG, str(ihl))} ({ihl*4}B)")
                     else:
                         ihl = needed_ihl
-                        print(f"  {c(GR,'→')}  IHL auto-adjusted to {c(MG, str(ihl))} ({ihl*4}B)")
-                else:
-                    ihl = needed_ihl
-                print(f"  {c(DM,'→')}  IHL={c(MG,str(ihl))}  ({ihl*4}B = 20B base + {len(ip_opts)}B opts)  "
-                      f"{c(DM,'[max IHL=15=60B]')}")
-            except Exception as e:
-                print(f"  {c(RD,'✗')}  Error: {e} {c(DM,'→ no options added')}")
+                    print(f"  {c(DM,'→')}  IHL={c(MG,str(ihl))}  ({ihl*4}B = 20B base + {len(ip_opts)}B opts)  "
+                          f"{c(DM,'[max IHL=15=60B]')}")
+                except Exception as e:
+                    print(f"  {c(RD,'✗')}  Error: {e} {c(DM,'→ no options added')}")
+            else:
+                print(f"  {c(RD,'✗')}  Invalid hex {c(DM,'→ no options added')}")
+
+        SRC, DST, tos, ff = scapy.inet_aton(src), scapy.inet_aton(dst), (dscp<<2)|ecn, 0x0000
+
+        # ── Payload size (first ask) ──────────────────────────
+        print()
+        _pl = input(f"  {c(CY,'ICMP Payload size B')}  [{c(YL,str(DEFAULT_PAYLOAD_LEN)+'B')} | {c(DM,'0 = empty payload')}]: ").strip()
+        payload_len = int(_pl) if _pl else DEFAULT_PAYLOAD_LEN
+        payload_len = max(0, payload_len)
+        lbl = c(DM,'empty payload') if payload_len == 0 else c(YL, str(payload_len)+'B')
+        print(f"  {c(GR,'→')}  {lbl}  {c(DM,'(can override again inside ICMP header section)')}")
+
+        # ── IP Checksum ──────────────────────────────────────
+        ip_opts_for_ck = ip_opts
+        preview   = ip_chksum(version, ihl, tos, ihl*4+8+payload_len,
+                              ip_id, ff, ttl, proto, SRC, DST, ip_opts)
+        opts_info = f"{c(YL,str(len(ip_opts))+'B')} = {c(MG, ip_opts.hex().upper())}" if ip_opts else c(DM,"none")
+        print(f"\n  {c(B+CY,'── IP Checksum preview ──')}")
+        print(f"     calc  = {c(MG, f'0x{preview:04x}')}")
+        print(f"     ID    = {c(MG, f'0x{ip_id:04x}')}")
+        print(f"     opts  = {opts_info}")
+
+        cs_in = input(f"\n  {c(CY,'Desired IP checksum')}  [{c(DM,'Enter = auto')}  |  {c(DM,'or type custom hex')}]: ").strip()
+        if cs_in:
+            try:
+                ip_ck     = int(cs_in.replace("0x",""), 16) & 0xFFFF
+                ip_custom = True
+                print(f"  {c(YL,'→')}  custom {c(MG, f'0x{ip_ck:04x}')}")
+            except:
+                print(f"  {c(RD,'✗')}  Invalid {c(DM,'→ using calculated value')}")
+                ip_custom = False
         else:
-            print(f"  {c(RD,'✗')}  Invalid hex {c(DM,'→ no options added')}")
+            ip_custom = False
 
-    SRC, DST, tos, ff = scapy.inet_aton(src), scapy.inet_aton(dst), (dscp<<2)|ecn, 0x0000
+        if not ip_custom and len(ip_opts) > 0:
+            ck_scope = input(f"  {c(CY,'Options bytes for checksum')}  [{c(DM,f'0-{len(ip_opts)}')} | {c(YL,f'Enter = all {len(ip_opts)}B')}]: ").strip()
+            try:    n_ck = max(0, min(len(ip_opts), int(ck_scope))) if ck_scope else len(ip_opts)
+            except: n_ck = len(ip_opts)
+            ip_opts_for_ck = ip_opts[:n_ck]
+            ip_ck = ip_chksum(version, ihl, tos, ihl*4+8+payload_len,
+                              ip_id, ff, ttl, proto, SRC, DST, ip_opts_for_ck)
+            print(f"  {c(GR,'→')}  {c(MG, f'0x{ip_ck:04x}')}  {c(DM, f'(20B + {n_ck}B opts used for checksum)')}")
+        elif not ip_custom:
+            ip_ck = preview
+            print(f"  {c(GR,'→')}  {c(MG, f'0x{ip_ck:04x}')}")
 
-    # ── Payload size (first ask) ──────────────────────────────
+        # ── Protocol selection ───────────────────────────────
+        section("Protocol")
+        use_raw    = False
+        use_ip_raw = False
+        if payload_len == 0:
+            print(f"  {c(GR,'1.')}  {c(WH,'ICMP')}  {c(DM,'(ICMP header only, no payload)')}")
+            print(f"  {c(GR,'2.')}  {c(WH,'Raw hex')}  {c(DM,'(bytes after IP header, uses proto field set above)')}")
+            print(f"  {c(GR,'3.')}  {c(WH,'IP Raw payload')}  {c(DM,'(reserved / non-standard proto — bare IP + raw body)')}")
+            proto_sel  = (input(f"\n  {c(WH,'→')} [1]: ").strip() or "1")
+            use_raw    = (proto_sel == "2")
+            use_ip_raw = (proto_sel == "3")
+        else:
+            print(f"  {c(GR,'1.')}  {c(WH,'ICMP')}  {c(DM,f'(payload={payload_len}B — raw hex option available inside ICMP section)')}")
+            print(f"  {c(DM,'2.')}  {c(DM,'Raw hex')}  {c(DM,'(hidden — only available when payload=0)')}")
+            print(f"  {c(DM,'3.')}  {c(DM,'IP Raw payload')}  {c(DM,'(hidden — only available when payload=0)')}")
+            input(f"\n  {c(WH,'→')} [1 only]: ")  # auto-forced to ICMP
+
+        # ════════════════════════════════════════════════════
+        #  RAW MODE  (option 2)
+        # ════════════════════════════════════════════════════
+        if use_raw:
+            section("Raw Payload")
+            print(f"  Enter hex bytes placed directly after the IP header.")
+            print(f"  {c(DM,'Any case accepted:')} {c(MG,'deadBEEF')} / {c(MG,'DEADBEEF')} / {c(MG,'deadbeef')}\n")
+
+            raw_in    = input(f"  {c(CY,'Raw hex')} {c(WH,'→')} ").strip()
+            raw_bytes = hex_to_bytes(raw_in)
+            if raw_bytes is None:
+                print(f"  {c(RD,'✗')}  Invalid hex {c(DM,'→ empty payload')}")
+                raw_bytes, raw_in = b'', ""
+            else:
+                print(f"  {c(GR,'✓')}  Accepted: {c(MG, raw_in)}  ({c(YL, str(len(raw_bytes))+'B')})")
+
+            padding = ask_padding()
+            count, interval, timeout, wait = ask_send_params()
+            body, cur_id = raw_bytes + padding, ip_id
+
+            print(f"\n  {c(GR,'Sending')} {c(YL,str(count))} packet(s) to {c(BL,dst)} ...\n")
+            lmac, rmac = resolve_mac(dst, src)
+
+            for i in range(count):
+                tlen = ihl*4 + len(body)
+                ck   = ip_ck if ip_custom else ip_chksum(
+                           version, ihl, tos, tlen, cur_id, ff, ttl, proto, SRC, DST, ip_opts_for_ck)
+                hdr  = build_ip_hdr(version, ihl, tos, tlen, cur_id, ff, ttl, proto, SRC, DST, ip_opts, ck)
+                send_frame(hdr + body, lmac, rmac, timeout, wait)
+                print(f"  {c(DM,f'[{i+1:>4}/{count}]')}  {c(GR,'RAW')}  {c(YL,str(len(raw_bytes))+'B')}"
+                      f"  IPck={c(MG,f'0x{ck:04x}')}  ID={c(MG,f'0x{cur_id:04x}')}"
+                      f"  hex={c(DM, raw_in)}")
+                cur_id = (cur_id + 1) % 65536
+                if i < count-1: time.sleep(interval)
+
+            print(f"\n  {c(GR+B,'Done.')}")
+            return
+
+        # ════════════════════════════════════════════════════
+        #  IP RAW PAYLOAD MODE  (option 3)
+        # ════════════════════════════════════════════════════
+        if use_ip_raw:
+            section("IP Raw Payload  (reserved / non-standard protocol)")
+            dm = c(DM,"│")
+            print(f"  {c(B+CY,'Reserved / unassigned protocol numbers (suggestions):')}")
+            print(f"  {c(DM,'┌──────┬──────┬────────────────────────────────────────────┐')}")
+            print(f"  {dm} {c(YL,'dec ')} {dm} {c(YL,'hex ')} {dm} {c(CY,'status')}                                     {dm}")
+            print(f"  {c(DM,'├──────┼──────┼────────────────────────────────────────────┤')}")
+            print(f"  {dm}   {c(GR,'0')}  {dm} {c(MG,'0x00')} {dm} HOPOPT  (reserved, rarely used)            {dm}")
+            print(f"  {dm}  {c(GR,'61')}  {dm} {c(MG,'0x3D')} {dm} any host internal protocol (unassigned)    {dm}")
+            print(f"  {dm}  {c(GR,'63')}  {dm} {c(MG,'0x3F')} {dm} any local network (unassigned)             {dm}")
+            print(f"  {dm} {c(GR,'143')}  {dm} {c(MG,'0x8F')} {dm} unassigned                                 {dm}")
+            print(f"  {dm} {c(GR,'253')}  {dm} {c(MG,'0xFD')} {dm} RFC 3692 experiment / testing              {dm}")
+            print(f"  {dm} {c(GR,'254')}  {dm} {c(MG,'0xFE')} {dm} RFC 3692 experiment / testing              {dm}")
+            print(f"  {dm} {c(GR,'255')}  {dm} {c(MG,'0xFF')} {dm} reserved                                   {dm}")
+            print(f"  {c(DM,'└──────┴──────┴────────────────────────────────────────────┘')}")
+            print(f"  {c(DM,'(any value 0-255 accepted)')}\n")
+
+            ip_raw_proto = parse_num(
+                prompt("IP Proto for raw payload", 8, "FD","11111101","253",
+                       lo=0, hi=255, note="reserved suggestions: 61 63 143 253 254 255"),
+                253, "IP proto")
+
+            print(f"\n  {c(CY,'Enter the raw IP payload bytes')} {c(DM,'(entire body after IP header)')}")
+            print(f"  {c(DM,'Any case:')} {c(MG,'deadBEEF')} / {c(MG,'DEADBEEF')} / {c(MG,'deadbeef')}\n")
+            raw_in    = input(f"  {c(CY,'Raw hex')} {c(WH,'→')} ").strip()
+            raw_bytes = hex_to_bytes(raw_in)
+            if raw_bytes is None:
+                print(f"  {c(RD,'✗')}  Invalid hex {c(DM,'→ empty payload')}")
+                raw_bytes, raw_in = b'', ""
+            else:
+                print(f"  {c(GR,'✓')}  Accepted: {c(MG, raw_in)}  ({c(YL, str(len(raw_bytes))+'B')})")
+
+            padding = ask_padding()
+            count, interval, timeout, wait = ask_send_params()
+            body, cur_id = raw_bytes + padding, ip_id
+
+            print(f"\n  {c(GR,'Sending')} {c(YL,str(count))} packet(s) to {c(BL,dst)}"
+                  f"  proto={c(MG,str(ip_raw_proto))} ({c(MG,f'0x{ip_raw_proto:02x}')}) ...\n")
+            lmac, rmac = resolve_mac(dst, src)
+
+            for i in range(count):
+                tlen = ihl*4 + len(body)
+                ck   = ip_ck if ip_custom else ip_chksum(
+                           version, ihl, tos, tlen, cur_id, ff, ttl, ip_raw_proto, SRC, DST, ip_opts_for_ck)
+                hdr  = build_ip_hdr(version, ihl, tos, tlen, cur_id, ff, ttl,
+                                    ip_raw_proto, SRC, DST, ip_opts, ck)
+                send_frame(hdr + body, lmac, rmac, timeout, wait)
+                print(f"  {c(DM,f'[{i+1:>4}/{count}]')}  {c(GR,'IP-RAW')}"
+                      f"  proto={c(MG,str(ip_raw_proto))}({c(MG,f'0x{ip_raw_proto:02x}')})"
+                      f"  {c(YL,str(len(raw_bytes))+'B')}"
+                      f"  IPck={c(MG,f'0x{ck:04x}')}  ID={c(MG,f'0x{cur_id:04x}')}")
+                cur_id = (cur_id + 1) % 65536
+                if i < count-1: time.sleep(interval)
+
+            print(f"\n  {c(GR+B,'Done.')}")
+            return
+
+        # ════════════════════════════════════════════════════
+        #  ICMP MODE  (not skip_ip, not raw, not ip_raw)
+        # ════════════════════════════════════════════════════
+        section("ICMP Header")
+        dm = c(DM,"│")
+        print(f"  {c(B+CY,'Type / Code reference')}")
+        print(f"  {c(DM,'┌──────┬──────┬────────────────────────────────────────┐')}")
+        print(f"  {dm} {c(YL,'type')} {dm} {c(YL,'code')} {dm} {c(CY,'meaning')}                                {dm}")
+        print(f"  {c(DM,'├──────┼──────┼────────────────────────────────────────┤')}")
+        print(f"  {dm}   {c(GR,'0')}  {dm}   {c(GR,'0')}  {dm} Echo Reply                             {dm}")
+        print(f"  {dm}   {c(GR,'3')}  {dm} {c(GR,'0-15')} {dm} Destination Unreachable                {dm}")
+        print(f"  {dm}   {c(GR,'8')}  {dm}   {c(GR,'0')}  {dm} Echo Request (ping)                    {dm}")
+        print(f"  {dm}  {c(GR,'11')}  {dm}   {c(GR,'0')}  {dm} Time Exceeded (TTL expired)            {dm}")
+        print(f"  {dm}  {c(GR,'12')}  {dm}   {c(GR,'0')}  {dm} Parameter Problem                      {dm}")
+        print(f"  {c(DM,'└──────┴──────┴────────────────────────────────────────┘')}\n")
+
+        itype = parse_num(prompt("Type", 8, "08","00001000","8",  lo=0, hi=255, note="1 byte"), 8, "Type")
+        icode = parse_num(prompt("Code", 8, "00","00000000","0",  lo=0, hi=255, note="1 byte"), 0, "Code")
+        iid   = parse_num(prompt("ID",  16, "0001","0"*15+"1","1",lo=0, hi=65535, note="2 bytes"), 1, "ID")
+        seqb  = parse_num(prompt("Seq", 16, "0001","0"*15+"1","1",lo=0, hi=65535, note="2 bytes"), 1, "Seq")
+
+        # ICMP checksum
+        ick_in = input(f"\n  {c(CY,'ICMP checksum')}  [{c(DM,'Enter = auto')}  |  {c(DM,'or type custom hex')}]: ").strip()
+        icmp_custom, icmp_ck_val, icmp_extra = bool(ick_in), None, 0
+        if icmp_custom:
+            try:
+                icmp_ck_val = int(ick_in.replace("0x",""), 16) & 0xFFFF
+                print(f"  {c(YL,'→')}  custom {c(MG, f'0x{icmp_ck_val:04x}')}")
+            except:
+                print(f"  {c(RD,'✗')}  Invalid {c(DM,'→ auto')}")
+                icmp_custom = False
+        else:
+            if input(f"  {c(CY,'Extra bytes in ICMP checksum?')} (y/n) [n]: ").strip().lower() in ('y','yes'):
+                try: icmp_extra = max(0, min(100, int(input("  Extra count [0]: ") or 0)))
+                except: pass
+            print(f"  {c(GR,'→')}  auto{c(YL, f'  +{icmp_extra}B extra') if icmp_extra else ''}")
+
+        # Payload size (second ask)
+        cur_pl_label = c(DM,'empty') if payload_len == 0 else c(YL, str(payload_len)+'B')
+        print(f"\n  Payload size is currently {cur_pl_label}  {c(DM,'(set earlier)')}")
+        pl_ov = input(f"  {c(CY,'ICMP Payload size B')}  [{c(DM,'Enter = keep')} {cur_pl_label}  |  {c(DM,'0 = empty')}  |  {c(DM,'or new size')}]: ").strip()
+        if pl_ov:
+            try:
+                payload_len = max(0, int(pl_ov))
+                lbl2 = c(DM,'empty payload') if payload_len == 0 else c(YL, str(payload_len)+'B')
+                print(f"  {c(GR,'→')}  {lbl2}")
+            except:
+                print(f"  {c(RD,'✗')}  Invalid {c(DM,f'→ keeping {payload_len}B')}")
+        else:
+            print(f"  {c(GR,'→')}  keeping {cur_pl_label}")
+
+        ptype, pat, icmp_raw_hex = 5, None, b''
+        print(f"""
+  {c(B+CY,'Payload type')}
+  {c(DM,'┌───┬──────────────────────────────────────────────────┐')}
+  {c(DM,'│')} {c(GR,'1')} {c(DM,'│')} random bits     {c(DM,'(0 or 1 per byte)')}                {c(DM,'│')}
+  {c(DM,'│')} {c(GR,'2')} {c(DM,'│')} random hex      {c(DM,'(0x00–0xFF random bytes)')}         {c(DM,'│')}
+  {c(DM,'│')} {c(GR,'3')} {c(DM,'│')} repeat pattern  {c(DM,'(single byte repeated)')}           {c(DM,'│')}
+  {c(DM,'│')} {c(GR,'4')} {c(DM,'│')} arithmetic      {c(DM,'(incrementing with ops)')}          {c(DM,'│')}
+  {c(DM,'│')} {c(GR,'5')} {c(DM,'│')} mixed           {c(DM,'(printable ASCII + symbols)')}      {c(DM,'│')}
+  {c(DM,'│')} {c(GR,'6')} {c(DM,'│')} bit stream      {c(DM,'(random runs of 0s and 1s)')}       {c(DM,'│')}
+  {c(DM,'│')} {c(GR,'7')} {c(DM,'│')} hex pair        {c(DM,'(two-byte alternating pattern)')}   {c(DM,'│')}
+  {c(DM,'│')} {c(GR,'8')} {c(DM,'│')} custom hex      {c(DM,'(you supply the bytes)')}           {c(DM,'│')}
+  {c(DM,'│')} {c(GR,'9')} {c(DM,'│')} raw hex         {c(DM,'(exact bytes as ICMP payload — any case)')} {c(DM,'│')}
+  {c(DM,'└───┴──────────────────────────────────────────────────┘')}""")
+        try:    ptype = int(input(f"  {c(WH,'→')} [5]: ").strip() or 5); ptype = ptype if 1<=ptype<=9 else 5
+        except: ptype = 5
+        if ptype == 3:
+            try:    pat = int((input(f"  {c(CY,'Pattern byte hex')} [AA]: ").strip() or "AA"), 16) & 0xFF
+            except: pat = 0xAA
+        elif ptype == 9:
+            raw_hex_in = input(f"  {c(CY,'ICMP raw hex payload')} {c(DM,'(any case: deadBEEF / DEADBEEF)')} {c(WH,'→')} ").strip()
+            icmp_raw_hex = hex_to_bytes(raw_hex_in) or b''
+            if not icmp_raw_hex and raw_hex_in:
+                print(f"  {c(RD,'✗')}  Invalid hex {c(DM,'→ empty')}")
+            else:
+                print(f"  {c(GR,'✓')}  {c(MG, raw_hex_in)}  ({c(YL, str(len(icmp_raw_hex))+'B')})")
+            payload_len = len(icmp_raw_hex)  # actual length now known
+
+        padding = ask_padding()
+        count, interval, timeout, wait = ask_send_params()
+
+        print(f"\n  {c(GR,'Sending')} {c(YL,str(count))} packet(s) to {c(BL,dst)} ...\n")
+        lmac, rmac, cur_id = *resolve_mac(dst, src), ip_id
+
+        for i in range(count):
+            seq     = (seqb + i) % 65536
+            payload = icmp_raw_hex if ptype == 9 else gen_payload(payload_len, ptype, pat)
+            if not icmp_custom and icmp_extra:
+                payload += b'\x00' * icmp_extra
+
+            ih      = bytes(ICMP(type=itype, code=icode, id=iid, seq=seq))
+            auto_ck = checksum(ih[:2] + b'\x00\x00' + ih[4:] + payload)
+            fck     = icmp_ck_val if icmp_custom else auto_ck
+            icmp_bytes = ih[:2] + fck.to_bytes(2,'big') + ih[4:] + payload + padding
+
+            tlen    = ihl*4 + len(icmp_bytes)
+            ip_ck_f = ip_ck if ip_custom else ip_chksum(
+                          version, ihl, tos, tlen, cur_id, ff, ttl, proto, SRC, DST, ip_opts_for_ck)
+            hdr     = build_ip_hdr(version, ihl, tos, tlen, cur_id, ff, ttl, proto, SRC, DST, ip_opts, ip_ck_f)
+
+            ans, _  = send_frame(hdr + icmp_bytes, lmac, rmac, timeout, wait)
+            print(f"  {c(DM,f'[{i+1:>4}/{count}]')}"
+                  f"  {c(BL,src)} {c(DM,'→')} {c(BL,dst)}"
+                  f"  {c(CY,f'ICMP {itype}/{icode}')}"
+                  f"  id={c(YL,str(iid))}  seq={c(YL,str(seq))}"
+                  f"  pay={c(YL,str(len(payload))+'B')}"
+                  f"  ICMPck={c(MG,f'0x{fck:04x}')}"
+                  f"  IPck={c(MG,f'0x{ip_ck_f:04x}')}"
+                  f"  ID={c(MG,f'0x{cur_id:04x}')}")
+
+            if wait:
+                if ans:
+                    r_ip   = ans[0][1][IP]   if IP   in ans[0][1] else None
+                    r_icmp = ans[0][1][ICMP] if ICMP in ans[0][1] else None
+                    print(f"       {c(GR,'↳')}  reply from {c(BL, r_ip.src if r_ip else '?')}")
+                    if r_icmp:
+                        recv = bytes(r_icmp.payload) if r_icmp.payload else b''
+                        ok   = checksum(bytes(r_icmp)) == 0
+                        ck_s = c(GR,'OK') if ok else c(RD,'BAD')
+                        mt_s = c(GR,'YES') if recv==payload else c(RD,f'NO  (sent {len(payload)}B  recv {len(recv)}B)')
+                        print(f"          ck={ck_s}  match={mt_s}")
+                else:
+                    print(f"       {c(YL,'↳')}  no reply {c(DM,'(timeout)')}")
+
+            cur_id = (cur_id + 1) % 65536
+            if i < count-1: time.sleep(interval)
+
+        print(f"\n  {c(GR+B,'Done.')}")
+        return  # end of not skip_ip branch
+
+    # ══════════════════════════════════════════════════════════
+    #  BRANCH B — skip_ip == True
+    #  Ask src/dst IPs only (needed for routing/MAC resolution
+    #  and for the IP header src/dst fields), then go straight
+    #  to the same 3-option protocol menu.
+    #  All IP field values are fixed defaults; total length and
+    #  checksum are computed after the payload is fully known.
+    # ══════════════════════════════════════════════════════════
+
+    section("IP Addresses  (required for routing — all other IP fields are auto)")
+    src = input(f"  {c(CY,'Src IP')}  [{c(BL, src_ip())}]: ").strip() or src_ip()
+    dst = input(f"  {c(CY,'Dst IP')}  [{c(BL,'8.8.8.8')}]:  ").strip() or "8.8.8.8"
+
+    # Fixed IP defaults for skip mode
+    version       = 4
+    ihl           = 5
+    tos           = 0          # DSCP=0, ECN=0
+    ttl           = 64
+    proto         = 1          # ICMP (may be overridden for raw modes below)
+    ip_id         = 0
+    ff            = 0x0000
+    ip_opts       = b''
+    ip_opts_for_ck = b''
+    ip_custom     = False
+    ip_ck         = 0          # placeholder — recalculated after body is known
+    SRC, DST      = scapy.inet_aton(src), scapy.inet_aton(dst)
+
+    # ── Payload size (first ask, same as original) ────────────
     print()
     _pl = input(f"  {c(CY,'ICMP Payload size B')}  [{c(YL,str(DEFAULT_PAYLOAD_LEN)+'B')} | {c(DM,'0 = empty payload')}]: ").strip()
     payload_len = int(_pl) if _pl else DEFAULT_PAYLOAD_LEN
@@ -334,49 +669,13 @@ def main():
     lbl = c(DM,'empty payload') if payload_len == 0 else c(YL, str(payload_len)+'B')
     print(f"  {c(GR,'→')}  {lbl}  {c(DM,'(can override again inside ICMP header section)')}")
 
-    # ── IP Checksum ──────────────────────────────────────────
-    ip_opts_for_ck = ip_opts
-    preview   = ip_chksum(version, ihl, tos, ihl*4+8+payload_len,
-                          ip_id, ff, ttl, proto, SRC, DST, ip_opts)
-    opts_info = f"{c(YL,str(len(ip_opts))+'B')} = {c(MG, ip_opts.hex().upper())}" if ip_opts else c(DM,"none")
-    print(f"\n  {c(B+CY,'── IP Checksum preview ──')}")
-    print(f"     calc  = {c(MG, f'0x{preview:04x}')}")
-    print(f"     ID    = {c(MG, f'0x{ip_id:04x}')}")
-    print(f"     opts  = {opts_info}")
-
-    cs_in = input(f"\n  {c(CY,'Desired IP checksum')}  [{c(DM,'Enter = auto')}  |  {c(DM,'or type custom hex')}]: ").strip()
-    if cs_in:
-        try:
-            ip_ck     = int(cs_in.replace("0x",""), 16) & 0xFFFF
-            ip_custom = True
-            print(f"  {c(YL,'→')}  custom {c(MG, f'0x{ip_ck:04x}')}")
-        except:
-            print(f"  {c(RD,'✗')}  Invalid {c(DM,'→ using calculated value')}")
-            ip_custom = False
-    else:
-        ip_custom = False
-
-    if not ip_custom and len(ip_opts) > 0:
-        ck_scope = input(f"  {c(CY,'Options bytes for checksum')}  [{c(DM,f'0-{len(ip_opts)}')} | {c(YL,f'Enter = all {len(ip_opts)}B')}]: ").strip()
-        try:    n_ck = max(0, min(len(ip_opts), int(ck_scope))) if ck_scope else len(ip_opts)
-        except: n_ck = len(ip_opts)
-        ip_opts_for_ck = ip_opts[:n_ck]
-        ip_ck = ip_chksum(version, ihl, tos, ihl*4+8+payload_len,
-                          ip_id, ff, ttl, proto, SRC, DST, ip_opts_for_ck)
-        print(f"  {c(GR,'→')}  {c(MG, f'0x{ip_ck:04x}')}  {c(DM, f'(20B + {n_ck}B opts used for checksum)')}")
-    elif not ip_custom:
-        ip_ck = preview
-        print(f"  {c(GR,'→')}  {c(MG, f'0x{ip_ck:04x}')}")
-
-    # ── Protocol selection ───────────────────────────────────
-    # When payload > 0 only ICMP is available.
-    # When payload = 0 all three modes are shown.
+    # ── Protocol selection (same 3 options as original) ───────
     section("Protocol")
     use_raw    = False
     use_ip_raw = False
     if payload_len == 0:
         print(f"  {c(GR,'1.')}  {c(WH,'ICMP')}  {c(DM,'(ICMP header only, no payload)')}")
-        print(f"  {c(GR,'2.')}  {c(WH,'Raw hex')}  {c(DM,'(bytes after IP header, uses proto field set above)')}")
+        print(f"  {c(GR,'2.')}  {c(WH,'Raw hex')}  {c(DM,'(bytes after IP header, uses proto=1 by default)')}")
         print(f"  {c(GR,'3.')}  {c(WH,'IP Raw payload')}  {c(DM,'(reserved / non-standard proto — bare IP + raw body)')}")
         proto_sel  = (input(f"\n  {c(WH,'→')} [1]: ").strip() or "1")
         use_raw    = (proto_sel == "2")
@@ -385,10 +684,10 @@ def main():
         print(f"  {c(GR,'1.')}  {c(WH,'ICMP')}  {c(DM,f'(payload={payload_len}B — raw hex option available inside ICMP section)')}")
         print(f"  {c(DM,'2.')}  {c(DM,'Raw hex')}  {c(DM,'(hidden — only available when payload=0)')}")
         print(f"  {c(DM,'3.')}  {c(DM,'IP Raw payload')}  {c(DM,'(hidden — only available when payload=0)')}")
-        input(f"\n  {c(WH,'→')} [1 only]: ")  # auto-forced to ICMP
+        input(f"\n  {c(WH,'→')} [1 only]: ")
 
     # ════════════════════════════════════════════════════════
-    #  RAW MODE  (option 2)
+    #  SKIP-IP  RAW MODE  (option 2)
     # ════════════════════════════════════════════════════════
     if use_raw:
         section("Raw Payload")
@@ -407,13 +706,23 @@ def main():
         count, interval, timeout, wait = ask_send_params()
         body, cur_id = raw_bytes + padding, ip_id
 
+        # ── Auto-calculate IP fields now that body size is known ──
+        section("IP Layer  (auto-calculated)")
+        tlen_preview = ihl*4 + len(body)
+        ck_preview   = ip_chksum(version, ihl, tos, tlen_preview, ip_id, ff, ttl, proto, SRC, DST)
+        print(f"  {c(CY,'Version')}  = {c(YL,'4')}   {c(CY,'IHL')} = {c(YL,'5')} ({c(YL,'20B')})   "
+              f"{c(CY,'TTL')} = {c(YL,'64')}   {c(CY,'Proto')} = {c(YL,'1 (ICMP)')}")
+        print(f"  {c(CY,'Total Length')} = {c(MG, str(tlen_preview)+'B')}  "
+              f"{c(DM,'(20B IP hdr + '+ str(len(body)) +'B body)')}")
+        print(f"  {c(CY,'Checksum')}     = {c(MG, f'0x{ck_preview:04x}')}  {c(DM,'(auto)')}")
+        print(f"  {c(CY,'Src')} = {c(BL,src)}   {c(CY,'Dst')} = {c(BL,dst)}")
+
         print(f"\n  {c(GR,'Sending')} {c(YL,str(count))} packet(s) to {c(BL,dst)} ...\n")
         lmac, rmac = resolve_mac(dst, src)
 
         for i in range(count):
             tlen = ihl*4 + len(body)
-            ck   = ip_ck if ip_custom else ip_chksum(
-                       version, ihl, tos, tlen, cur_id, ff, ttl, proto, SRC, DST, ip_opts_for_ck)
+            ck   = ip_chksum(version, ihl, tos, tlen, cur_id, ff, ttl, proto, SRC, DST)
             hdr  = build_ip_hdr(version, ihl, tos, tlen, cur_id, ff, ttl, proto, SRC, DST, ip_opts, ck)
             send_frame(hdr + body, lmac, rmac, timeout, wait)
             print(f"  {c(DM,f'[{i+1:>4}/{count}]')}  {c(GR,'RAW')}  {c(YL,str(len(raw_bytes))+'B')}"
@@ -426,7 +735,7 @@ def main():
         return
 
     # ════════════════════════════════════════════════════════
-    #  IP RAW PAYLOAD MODE  (option 3)
+    #  SKIP-IP  IP RAW PAYLOAD MODE  (option 3)
     # ════════════════════════════════════════════════════════
     if use_ip_raw:
         section("IP Raw Payload  (reserved / non-standard protocol)")
@@ -464,14 +773,24 @@ def main():
         count, interval, timeout, wait = ask_send_params()
         body, cur_id = raw_bytes + padding, ip_id
 
+        # ── Auto-calculate IP fields now that body size is known ──
+        section("IP Layer  (auto-calculated)")
+        tlen_preview = ihl*4 + len(body)
+        ck_preview   = ip_chksum(version, ihl, tos, tlen_preview, ip_id, ff, ttl, ip_raw_proto, SRC, DST)
+        print(f"  {c(CY,'Version')}  = {c(YL,'4')}   {c(CY,'IHL')} = {c(YL,'5')} ({c(YL,'20B')})   "
+              f"{c(CY,'TTL')} = {c(YL,'64')}   {c(CY,'Proto')} = {c(MG, str(ip_raw_proto)+f' (0x{ip_raw_proto:02x})')}")
+        print(f"  {c(CY,'Total Length')} = {c(MG, str(tlen_preview)+'B')}  "
+              f"{c(DM,'(20B IP hdr + '+ str(len(body)) +'B body)')}")
+        print(f"  {c(CY,'Checksum')}     = {c(MG, f'0x{ck_preview:04x}')}  {c(DM,'(auto)')}")
+        print(f"  {c(CY,'Src')} = {c(BL,src)}   {c(CY,'Dst')} = {c(BL,dst)}")
+
         print(f"\n  {c(GR,'Sending')} {c(YL,str(count))} packet(s) to {c(BL,dst)}"
               f"  proto={c(MG,str(ip_raw_proto))} ({c(MG,f'0x{ip_raw_proto:02x}')}) ...\n")
         lmac, rmac = resolve_mac(dst, src)
 
         for i in range(count):
             tlen = ihl*4 + len(body)
-            ck   = ip_ck if ip_custom else ip_chksum(
-                       version, ihl, tos, tlen, cur_id, ff, ttl, ip_raw_proto, SRC, DST, ip_opts_for_ck)
+            ck   = ip_chksum(version, ihl, tos, tlen, cur_id, ff, ttl, ip_raw_proto, SRC, DST)
             hdr  = build_ip_hdr(version, ihl, tos, tlen, cur_id, ff, ttl,
                                 ip_raw_proto, SRC, DST, ip_opts, ck)
             send_frame(hdr + body, lmac, rmac, timeout, wait)
@@ -486,7 +805,7 @@ def main():
         return
 
     # ════════════════════════════════════════════════════════
-    #  ICMP MODE
+    #  SKIP-IP  ICMP MODE
     # ════════════════════════════════════════════════════════
     section("ICMP Header")
     dm = c(DM,"│")
@@ -522,7 +841,7 @@ def main():
             except: pass
         print(f"  {c(GR,'→')}  auto{c(YL, f'  +{icmp_extra}B extra') if icmp_extra else ''}")
 
-    # Payload size (second ask)
+    # Payload size override (second ask — same as original)
     cur_pl_label = c(DM,'empty') if payload_len == 0 else c(YL, str(payload_len)+'B')
     print(f"\n  Payload size is currently {cur_pl_label}  {c(DM,'(set earlier)')}")
     pl_ov = input(f"  {c(CY,'ICMP Payload size B')}  [{c(DM,'Enter = keep')} {cur_pl_label}  |  {c(DM,'0 = empty')}  |  {c(DM,'or new size')}]: ").strip()
@@ -536,8 +855,6 @@ def main():
     else:
         print(f"  {c(GR,'→')}  keeping {cur_pl_label}")
 
-    # Payload type — payload_len > 0 guaranteed here
-    # Option 9 = raw hex (user supplies exact bytes, no generation)
     ptype, pat, icmp_raw_hex = 5, None, b''
     print(f"""
   {c(B+CY,'Payload type')}
@@ -564,17 +881,33 @@ def main():
             print(f"  {c(RD,'✗')}  Invalid hex {c(DM,'→ empty')}")
         else:
             print(f"  {c(GR,'✓')}  {c(MG, raw_hex_in)}  ({c(YL, str(len(icmp_raw_hex))+'B')})")
-        payload_len = len(icmp_raw_hex)  # actual length now known
+        payload_len = len(icmp_raw_hex)
 
     padding = ask_padding()
     count, interval, timeout, wait = ask_send_params()
+
+    # ── Auto-calculate IP fields now that all payload info is known ──
+    # Build a sample ICMP packet to get the real icmp_bytes length for tlen preview
+    _sample_payload = icmp_raw_hex if ptype == 9 else b'\x00' * payload_len
+    _sample_ih      = bytes(ICMP(type=itype, code=icode, id=iid, seq=seqb))
+    _sample_icmp    = _sample_ih + _sample_payload + padding
+    _tlen_preview   = ihl*4 + len(_sample_icmp)
+    _ck_preview     = ip_chksum(version, ihl, tos, _tlen_preview, ip_id, ff, ttl, proto, SRC, DST)
+
+    section("IP Layer  (auto-calculated)")
+    print(f"  {c(CY,'Version')}  = {c(YL,'4')}   {c(CY,'IHL')} = {c(YL,'5')} ({c(YL,'20B')})   "
+          f"{c(CY,'TTL')} = {c(YL,'64')}   {c(CY,'Proto')} = {c(YL,'1 (ICMP)')}")
+    print(f"  {c(CY,'Total Length')} = {c(MG, str(_tlen_preview)+'B')}  "
+          f"{c(DM,'(20B IP hdr + 8B ICMP hdr + '+ str(payload_len) +'B payload + '+ str(len(padding)) +'B pad)')}")
+    print(f"  {c(CY,'Checksum')}     = {c(MG, f'0x{_ck_preview:04x}')}  {c(DM,'(auto — recalculated per packet for correct ID)')}")
+    print(f"  {c(CY,'ID')}           = {c(MG, f'0x{ip_id:04x}')}  {c(DM,'(increments per packet)')}")
+    print(f"  {c(CY,'Src')} = {c(BL,src)}   {c(CY,'Dst')} = {c(BL,dst)}")
 
     print(f"\n  {c(GR,'Sending')} {c(YL,str(count))} packet(s) to {c(BL,dst)} ...\n")
     lmac, rmac, cur_id = *resolve_mac(dst, src), ip_id
 
     for i in range(count):
         seq     = (seqb + i) % 65536
-        # ptype 9 = raw hex — use exact bytes supplied by user
         payload = icmp_raw_hex if ptype == 9 else gen_payload(payload_len, ptype, pat)
         if not icmp_custom and icmp_extra:
             payload += b'\x00' * icmp_extra
@@ -584,9 +917,9 @@ def main():
         fck     = icmp_ck_val if icmp_custom else auto_ck
         icmp_bytes = ih[:2] + fck.to_bytes(2,'big') + ih[4:] + payload + padding
 
+        # IP total length and checksum computed here with actual icmp_bytes size
         tlen    = ihl*4 + len(icmp_bytes)
-        ip_ck_f = ip_ck if ip_custom else ip_chksum(
-                      version, ihl, tos, tlen, cur_id, ff, ttl, proto, SRC, DST, ip_opts_for_ck)
+        ip_ck_f = ip_chksum(version, ihl, tos, tlen, cur_id, ff, ttl, proto, SRC, DST)
         hdr     = build_ip_hdr(version, ihl, tos, tlen, cur_id, ff, ttl, proto, SRC, DST, ip_opts, ip_ck_f)
 
         ans, _  = send_frame(hdr + icmp_bytes, lmac, rmac, timeout, wait)
@@ -617,6 +950,7 @@ def main():
         if i < count-1: time.sleep(interval)
 
     print(f"\n  {c(GR+B,'Done.')}")
+
 
 if __name__ == "__main__":
     try:    main()
